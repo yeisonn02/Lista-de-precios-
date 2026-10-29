@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lista de precios</title>
+<style>
+:root{--bg:#f3f6f1;--surface:#fff;--ink:#1d2a22;--muted:#66756b;--line:#d9e1d6;--accent:#1f6f4a;--accent-ink:#fff;--wh:#fff4d6;--danger:#b3412e;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#141a16;--surface:#1c241f;--ink:#e8efe9;--muted:#93a399;--line:#2d3a32;--accent:#4fbf88;--accent-ink:#0c1a12;--wh:#3a3216;--danger:#e57a66}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#141a16;--surface:#1c241f;--ink:#e8efe9;--muted:#93a399;--line:#2d3a32;--accent:#4fbf88;--accent-ink:#0c1a12;--wh:#3a3216;--danger:#e57a66}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 "Trebuchet MS","Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px 14px 40px}
+h1{font-size:1.4rem;margin:4px 0 12px}
+.bar{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);padding:6px 0 10px;z-index:5}
+.search{width:100%;padding:13px 14px;font-size:1rem;border:2px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink)}
+.search:focus,td input:focus,td textarea:focus{outline:3px solid var(--accent);outline-offset:0}
+.meta{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;color:var(--muted);font-size:.9rem}
+.btns{display:flex;gap:8px}
+button{font:inherit;border:0;border-radius:10px;padding:10px 14px;cursor:pointer}
+.add{background:var(--accent);color:var(--accent-ink);font-weight:700}
+.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.wrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+table{width:100%;border-collapse:collapse;min-width:480px}
+th{text-align:left;padding:10px 8px;font-size:.9rem;color:var(--muted);border-bottom:2px solid var(--line)}
+th.n{text-align:right}
+td{padding:0;border-bottom:1px solid var(--line)}
+td input,td textarea{width:100%;border:0;background:transparent;color:var(--ink);font:inherit;padding:13px 8px}
+td textarea{resize:none;overflow:hidden;display:block;padding-bottom:2px;font-weight:600;line-height:1.3}
+td input.pres{font-size:.85rem;color:var(--muted);padding-top:2px;padding-bottom:10px}
+th:first-child{width:46%}
+td.p input{text-align:right;font-variant-numeric:tabular-nums}
+td.w{background:var(--wh)}
+td.w input{font-weight:700}
+td.x{width:44px;text-align:center}
+.del{background:transparent;color:var(--danger);padding:8px;font-size:1.1rem}
+.empty{padding:28px 14px;text-align:center;color:var(--muted)}
+.hint{color:var(--muted);font-size:.85rem;margin-top:10px}
+</style>
+</head>
+<body>
+<main>
+<h1>Lista de precios</h1>
+<div class="bar">
+<input id="q" class="search" type="search" placeholder="Buscar producto…" autocomplete="off">
+<div class="meta"><span id="count"></span>
+<div class="btns"><button class="ghost" id="csv">Descargar CSV</button><button class="add" id="add">+ Producto</button></div></div>
+</div>
+<div class="wrap"><table>
+<thead><tr><th>Producto y presentación</th><th class="n">Precio unidad</th><th class="n">Precio por mayor</th><th></th></tr></thead>
+<tbody id="rows"></tbody></table>
+<div class="empty" id="empty" hidden>No hay productos. Toca “+ Producto” para agregar el primero.</div></div>
+<p class="hint">Toca cualquier celda para editarla. Los cambios se guardan solos.</p>
+<p class="hint" id="status" aria-live="polite">Conectando…</p>
+</main>
+<script>
+(function(){
+var KEY="lista-precios-v1",data=[],rows=document.getElementById("rows"),q=document.getElementById("q");
+function load(){try{var s=localStorage.getItem(KEY);if(s)data=JSON.parse(s)||[]}catch(e){data=[]}}
+var dbDoc=null,timer=null,touched={},st=document.getElementById("status");
+function setStatus(t){st.textContent=t}
+function local(){try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}}
+function push(){setStatus("Guardando…");return dbDoc.set({items:data}).then(function(){setStatus("Guardado en la nube ✓")}).catch(function(){setStatus("No se pudo guardar en la nube. Descarga el CSV como respaldo.")})}
+function save(){local();if(!dbDoc)return;clearTimeout(timer);timer=setTimeout(push,500)}
+function connect(){
+if(!window.claude||!claude.use){setStatus("Solo guardado en este dispositivo");return}
+claude.use("db").then(function(db){
+if(!db){setStatus("Solo guardado en este dispositivo");return}
+var ref=db.doc("lista/principal");
+ref.get().then(function(s){
+var cloud=s.exists&&s.data()&&s.data().items;
+dbDoc=ref;
+if(cloud&&cloud.length){var mine=data.filter(function(r){return touched[r.id]}),ids={};mine.forEach(function(r){ids[r.id]=1});data=cloud.filter(function(r){return !ids[r.id]}).concat(mine);local();keepRender();if(mine.length)push();else setStatus("Guardado en la nube ✓")}
+else if(data.length){push()}
+else{setStatus("Guardado en la nube ✓")}
+}).catch(function(){setStatus("Solo guardado en este dispositivo")})
+}).catch(function(){setStatus("Solo guardado en este dispositivo")})}
+function fmt(n){return n===""||n==null?"":"$ "+Number(n).toLocaleString("es-CO")}
+function num(s){var d=String(s).replace(/\D/g,"");return d===""?"":Number(d)}
+function norm(s){return String(s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
+function render(focusId){
+var t=norm(q.value.trim()),list=data.filter(function(r){return !t||norm(r.n+" "+(r.p||"")).indexOf(t)>-1}).sort(cmp);
+rows.innerHTML="";
+list.forEach(function(r){
+var tr=document.createElement("tr");tr.dataset.id=r.id;
+tr.innerHTML='<td><textarea rows="1" data-f="n" placeholder="Nombre del producto" aria-label="Producto"></textarea><input class="pres" data-f="p" placeholder="Presentación (caja x24, litro, 1/2 galón…)" aria-label="Presentación"></td>'+
+'<td class="p"><input data-f="u" inputmode="numeric" placeholder="$ 0" aria-label="Precio unidad"></td>'+
+'<td class="p w"><input data-f="m" inputmode="numeric" placeholder="$ 0" aria-label="Precio por mayor"></td>'+
+'<td class="x"><button class="del" aria-label="Eliminar">✕</button></td>';
+var nm=tr.querySelector("textarea"),i=tr.querySelectorAll("input");nm.value=r.n;i[0].value=r.p||"";i[1].value=fmt(r.u);i[2].value=fmt(r.m);
+rows.appendChild(tr);grow(nm)});
+document.getElementById("empty").hidden=list.length>0||data.length===0&&false?true:list.length>0;
+if(!list.length)document.getElementById("empty").textContent=data.length?"Ningún producto coincide con la búsqueda.":"No hay productos. Toca “+ Producto” para agregar el primero.";
+document.getElementById("count").textContent=list.length+" de "+data.length+" productos";
+if(focusId){var f=rows.querySelector('tr[data-id="'+focusId+'"] textarea');if(f)f.focus()}}
+function find(el){var tr=el.closest("tr");return data.filter(function(r){return r.id===tr.dataset.id})[0]}
+rows.addEventListener("input",function(e){var el=e.target,f=el.dataset.f;if(!f)return;var r=find(el);touched[r.id]=1;
+r[f]=(f==="n"||f==="p")?el.value:num(el.value);if(el.tagName==="TEXTAREA")grow(el);if(f==="n"||f==="p")dirty=true;save()});
+function grow(el){el.style.height="auto";el.style.height=el.scrollHeight+"px"}
+var dirty=false;
+function keepRender(){var a=document.activeElement,r2=a&&a.closest?a.closest("tr"):null,id=r2&&rows.contains(r2)?r2.dataset.id:null,f=id?a.dataset.f:null;render();if(id&&f){var el=rows.querySelector('tr[data-id="'+id+'"] [data-f="'+f+'"]');if(el)el.focus()}}
+function cmp(a,b){var o={sensitivity:"base",numeric:true};return String(a.n).localeCompare(String(b.n),"es",o)||String(a.p||"").localeCompare(String(b.p||""),"es",o)}
+rows.addEventListener("focusout",function(e){var tr=e.target.closest("tr");if(!tr||!dirty)return;var nx=e.relatedTarget;if(nx&&(tr.contains(nx)||nx.classList.contains("del")))return;dirty=false;setTimeout(function(){var a=document.activeElement,r2=a&&a.closest?a.closest("tr"):null,id=r2&&rows.contains(r2)?r2.dataset.id:null,f=id?a.dataset.f:null;render();if(id&&f){var el=rows.querySelector('tr[data-id="'+id+'"] [data-f="'+f+'"]');if(el)el.focus()}},150)});
+rows.addEventListener("keydown",function(e){if(e.key==="Enter"&&e.target.tagName==="TEXTAREA")e.preventDefault()});
+rows.addEventListener("blur",function(e){var el=e.target,f=el.dataset.f;if(f==="u"||f==="m")el.value=fmt(find(el)[f])},true);
+rows.addEventListener("click",function(e){if(!e.target.classList.contains("del"))return;
+var r=find(e.target);if(confirm("¿Eliminar "+(r.n||"este producto")+"?")){data=data.filter(function(x){return x!==r});save();render()}});
+document.getElementById("add").onclick=function(){q.value="";var r={id:uid(),n:"",p:"",u:"",m:""};touched[r.id]=1;data.unshift(r);save();render(r.id)};
+q.addEventListener("input",function(){render()});
+document.getElementById("csv").onclick=function(){
+var out="Producto,Presentación,Precio unidad,Precio por mayor\n"+data.slice().sort(cmp).map(function(r){return '"'+String(r.n).replace(/"/g,'""')+'","'+String(r.p||"").replace(/"/g,'""')+'",'+r.u+","+r.m}).join("\n");
+if(!window.claude||!claude.use){alert("La descarga no está disponible aquí");return}
+claude.use("downloads").then(function(d){if(!d){alert("La descarga no está disponible aquí");return}d.save({filename:"lista-precios.csv",data:new Blob(["\ufeff"+out],{type:"text/csv"})}).catch(function(){})})};
+load();render();connect();
+})();
+</script>
+</body>
+</html>
